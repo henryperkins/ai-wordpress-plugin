@@ -1,6 +1,6 @@
 # WordPress AI Plugin — Integration Guide
 
-A practical, end‑to‑end guide to using and extending the WordPress AI plugin (`v0.8.0`). It covers end‑user setup, the Connectors API, the Abilities API surface (REST + PHP), the experiment/feature framework, hooks/filters, and asset loading.
+A practical, end‑to‑end guide to using and extending the WordPress AI plugin (`v0.9.0`). It covers end‑user setup, the Connectors API, the Abilities API surface (REST + PHP), the experiment/feature framework, hooks/filters, and asset loading.
 
 > Companion docs in this directory: [`ARCHITECTURE_OVERVIEW.md`](ARCHITECTURE_OVERVIEW.md), [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md), [`TESTING_REST_API.md`](TESTING_REST_API.md), and per‑experiment specs in [`experiments/`](experiments/).
 
@@ -404,4 +404,4 @@ if ( WordPress\AI\has_valid_ai_credentials() ) { /* render button */ }
 
 ---
 
-*Generated against `ai.php` v0.8.0. If you change a hook signature or add a new connector field, please update this guide.*
+*Generated against `ai.php` v0.9.0. If you change a hook signature or add a new connector field, please update this guide.*
