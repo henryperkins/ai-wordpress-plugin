@@ -56,8 +56,8 @@ class My_Experiment extends Abstract_Feature {
    */
   protected function load_metadata(): array {
     return array(
-    'label'       => __( 'My Experiment', 'ai' ),
-    'description' => __( 'Description of what my experiment does.', 'ai' ),
+      'label'       => __( 'My Experiment', 'ai' ),
+      'description' => __( 'Description of what my experiment does.', 'ai' ),
     );
   }
 
@@ -92,11 +92,11 @@ class My_Experiment extends Abstract_Feature {
   public function enqueue_assets( string $hook_suffix ): void {
     Asset_Loader::enqueue_script( 'my-experiment', 'experiments/my-experiment' );
     Asset_Loader::localize_script(
-    'my-experiment',
-    'MyExperimentData',
-    array(
-      'enabled' => $this->is_enabled(),
-    )
+      'my-experiment',
+      'MyExperimentData',
+      array(
+        'enabled' => $this->is_enabled(),
+      )
     );
   }
 
@@ -229,6 +229,33 @@ The plugin also includes the following action hooks:
 - `wpai_register_features`: Fires after default features are registered, receives `$registry` parameter
 - `wpai_features_initialized`: Fires after all enabled features have run `register()`. It does not fire if the loader-level `wpai_features_enabled` filter returns false.
 
+### Editorial Guidelines
+
+When the `wp_guideline` post type is available, AI abilities can opt into site-wide editorial guidance for tone, copy, image, and other prompt constraints. The plugin consumes those guidelines; it does not manage the guidelines UI.
+
+Abilities opt in by returning the categories they support:
+
+```php
+protected function guideline_categories(): array {
+  return array( 'site', 'copy' );
+}
+```
+
+Supported categories are `site`, `copy`, `images`, and `additional`. Block-specific guidelines can also be included when a block name is supplied to the prompt formatter.
+
+For code that generates prompts outside an ability, use the helper functions:
+
+```php
+$xml = WordPress\AI\format_guidelines_for_prompt(
+  array( 'site', 'copy' ),
+  'core/paragraph'
+);
+
+$guidelines = WordPress\AI\get_guidelines();
+```
+
+The `wpai_use_guidelines` filter can disable guideline injection, and `wpai_max_guideline_length` controls the per-category character limit.
+
 ### Asset Loading
 
 The plugin provides a utility class for loading assets. This uses `wp-scripts` to build assets which are expected to live within the `src/` directory. They will then be built into the `build-scripts/` directory, where the asset loader will look for the files, pulling in the proper dependencies and versioning.
@@ -241,6 +268,7 @@ use WordPress\AI\Asset_Loader;
  *
  * First argument is the script handle.
  * The second argument is the script file name.
+ * The optional third argument is a boolean to include the core abilities script.
  * This script file name should be in the build-scripts/ directory.
  * The source script files should be in the src/ directory. If needed,
  * you can add the entry point to the webpack.config.js file.
@@ -352,6 +380,8 @@ For more detailed information on plugin architecture, creating experiments, and 
 - [Architecture Overview](ARCHITECTURE_OVERVIEW.md) - Comprehensive guide to plugin architecture
 - [Testing Strategy](TESTING.md) – Testing philosophy and guidelines
 - [Testing REST API Strategy](TESTING_REST_API.md) – Guidelines specific to testing REST API integrations
+- [Experiment Framework](experiments/experiment-framework.md) - How experiments are registered, toggled, and initialized
+- [Multi-Provider Support](experiments/multi-provider-support.md) - Provider detection, model preference, and fallback behavior
 - [Example Experiment](../includes/Experiments/Example_Experiment/README.md) - Reference implementation
 - [Custom Experiment Reference](experiments/custom-experiment-reference.md) - Documented example for extending the plugin
 - [Release Instructions](RELEASE_INSTRUCTIONS.md) - Checklist steps for releasing versions of the plugin
