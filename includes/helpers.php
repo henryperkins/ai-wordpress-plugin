@@ -10,9 +10,11 @@ declare( strict_types=1 );
 namespace WordPress\AI;
 
 use Throwable;
+use WordPress\AI\Experiments\Summarization\Summarization;
 use WordPress\AI\Services\AI_Service;
 use WordPress\AI\Services\Guidelines;
 use WordPress\AiClient\AiClient;
+use WordPress\AiClient\Providers\Models\Enums\CapabilityEnum;
 
 /**
  * Purposely using return instead of exit here.
@@ -76,31 +78,39 @@ function normalize_content( string $content ): string {
 }
 
 /**
- * Counts the number of words in a string with Unicode support.
- * Handles non-Latin scripts including; CJK (Chinese, Japanese, Korean), Arabic, Cyrillic, etc.
- * This approach mirrors the approach used by WordPress's JavaScript word counter.
+ * Counts characters excluding whitespace, with Unicode support.
  *
- * @since 0.9.0
+ * This approximately mirrors @wordpress/wordcount's
+ * `characters_excluding_spaces` strategy used in the editor.
  *
- * @param string $text The text to count words in.
- * @return int The number of words.
+ * @since 1.1.0
+ *
+ * @param string $text The text to count characters in.
+ * @return int The number of non-whitespace characters.
  */
-function count_words( string $text ): int {
-	$text = trim( $text );
-	if ( '' === $text ) {
+function count_characters_excluding_spaces( string $text ): int {
+	if ( empty( $text ) ) {
 		return 0;
 	}
 
-	/*
-	 * Insert spaces around CJK ideographs and Japanese kana so each
-	 * character is counted individually.
-	 */
-	$cjk_pattern = '/([\x{2E80}-\x{9FFF}\x{F900}-\x{FAFF}\x{FE30}-\x{FE4F}\x{20000}-\x{2FA1F}\x{3040}-\x{309F}\x{30A0}-\x{30FF}])/u';
-	$text        = preg_replace( $cjk_pattern, ' $1 ', $text ) ?? $text;
-	$text        = trim( preg_replace( '/\s+/u', ' ', $text ) ?? $text );
-	$words       = preg_split( '/\s+/u', $text, -1, PREG_SPLIT_NO_EMPTY );
+	// Strip all HTML tags including comments.
+	$text = wp_strip_all_tags( $text );
 
-	return is_array( $words ) ? count( $words ) : 0;
+	// Normalize NBSP entities to whitespace.
+	$text = preg_replace( '/&nbsp;|&#160;/i', ' ', $text ) ?? $text;
+
+	// Transpose HTML entities to countable characters.
+	$text = preg_replace( '/&\S+?;/u', 'a', $text ) ?? $text;
+
+	/*
+	 * Count non-whitespace code points using a class that mirrors JavaScript's
+	 * \s semantics, so full-width CJK spaces and similar separators match the
+	 * editor's @wordpress/wordcount result.
+	 */
+	$whitespace = '\x{0009}\x{000A}\x{000B}\x{000C}\x{000D}\x{0020}\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}';
+	$count      = preg_match_all( sprintf( '/[^%s]/u', $whitespace ), $text );
+
+	return is_int( $count ) ? $count : 0;
 }
 
 /**
@@ -146,7 +156,14 @@ function get_post_context( int $post_id ): array {
 			$grouped_terms = array();
 
 			foreach ( $terms as $term ) {
-				$grouped_terms[ $term->taxonomy ][] = $term->name;
+				$taxonomy = $term['taxonomy'] ?? '';
+				$name     = $term['name'] ?? '';
+
+				if ( '' === $taxonomy || '' === $name ) {
+					continue;
+				}
+
+				$grouped_terms[ $taxonomy ][] = $name;
 			}
 
 			$context = array_merge(
@@ -372,7 +389,7 @@ function format_guidelines_for_prompt( array $categories, ?string $block_name = 
 /**
  * Determines if a connector is configured.
  *
- * @since x.x.x
+ * @since 1.0.1
  *
  * @param string $connector_id The connector ID.
  * @return bool True if the connector is configured, false otherwise.
@@ -380,6 +397,79 @@ function format_guidelines_for_prompt( array $categories, ?string $block_name = 
 function is_connector_configured( string $connector_id ): bool {
 	$registry = AiClient::defaultRegistry();
 	return $registry->hasProvider( $connector_id ) && $registry->isProviderConfigured( $connector_id );
+}
+
+/**
+ * Determines if a connector has authentication in place.
+ *
+ * This checks for API-key credentials by source only (environment variable,
+ * PHP constant, or stored option) and does not make external API requests.
+ *
+ * @since 1.0.1
+ *
+ * @param string $connector_id The connector ID.
+ * @return bool True if connector authentication is present, false otherwise.
+ */
+function has_connector_authentication( string $connector_id ): bool {
+	if ( ! wp_is_connector_registered( $connector_id ) ) {
+		return false;
+	}
+
+	$connector = wp_get_connector( $connector_id );
+	if ( ! is_array( $connector ) ) {
+		return false;
+	}
+
+	$auth = $connector['authentication'] ?? null;
+	if ( ! is_array( $auth ) || ( $auth['method'] ?? '' ) !== 'api_key' ) {
+		return false;
+	}
+
+	$setting_name = $auth['setting_name'] ?? '';
+	if ( ! is_string( $setting_name ) || '' === $setting_name ) {
+		return false;
+	}
+
+	return 'none' !== get_connector_api_key_source(
+		$setting_name,
+		$auth['env_var_name'] ?? '',
+		$auth['constant_name'] ?? ''
+	);
+}
+
+/**
+ * Determines the source of a connector API key.
+ *
+ * Checks in order: environment variable, PHP constant, database option.
+ *
+ * @since 1.0.1
+ *
+ * @param string $setting_name  The option name for the API key.
+ * @param string $env_var_name  Optional environment variable name.
+ * @param string $constant_name Optional PHP constant name.
+ * @return string The key source: 'env', 'constant', 'database', or 'none'.
+ */
+function get_connector_api_key_source( string $setting_name, string $env_var_name = '', string $constant_name = '' ): string {
+	if ( '' !== $env_var_name ) {
+		$env_value = getenv( $env_var_name );
+		if ( false !== $env_value && '' !== $env_value ) {
+			return 'env';
+		}
+	}
+
+	if ( '' !== $constant_name && defined( $constant_name ) ) {
+		$const_value = constant( $constant_name );
+		if ( is_string( $const_value ) && '' !== $const_value ) {
+			return 'constant';
+		}
+	}
+
+	$db_value = get_option( $setting_name, '' );
+	if ( '' !== $db_value ) {
+		return 'database';
+	}
+
+	return 'none';
 }
 
 /**
@@ -399,7 +489,7 @@ function has_ai_credentials(): bool {
 			continue;
 		}
 
-		if ( ! is_connector_configured( $connector_id ) ) {
+		if ( ! has_connector_authentication( $connector_id ) ) {
 			continue;
 		}
 
@@ -419,6 +509,70 @@ function has_ai_credentials(): bool {
 	 * @param array $connectors      The registered connectors.
 	 */
 	return (bool) apply_filters( 'wpai_has_ai_credentials', $has_credentials, $connectors );
+}
+
+/**
+ * Checks whether any configured connector exposes an image-generation-capable model.
+ *
+ * @since 1.0.2
+ *
+ * @param bool $reset_cache Whether to bypass the static cache and recompute. Default false.
+ * @return bool True if at least one connector supports image generation.
+ */
+function has_image_generation_support( bool $reset_cache = false ): bool {
+	static $result = null;
+
+	if ( ! $reset_cache && null !== $result ) {
+		return $result;
+	}
+
+	$connectors  = array();
+	$has_support = false;
+
+	if ( class_exists( AiClient::class ) ) {
+		$registry   = AiClient::defaultRegistry();
+		$connectors = get_ai_connectors();
+
+		foreach ( array_keys( $connectors ) as $connector_id ) {
+			if ( ! has_connector_authentication( $connector_id ) ) {
+				continue;
+			}
+
+			try {
+				$provider_class = $registry->getProviderClassName( $connector_id );
+
+				/** @var \WordPress\AiClient\Providers\Contracts\ProviderInterface $provider_class */
+				$models = $provider_class::modelMetadataDirectory()->listModelMetadata();
+
+				foreach ( $models as $model ) {
+					foreach ( $model->getSupportedCapabilities() as $capability ) {
+						if ( CapabilityEnum::IMAGE_GENERATION === $capability->value ) {
+							$has_support = true;
+							break 3;
+						}
+					}
+				}
+			} catch ( Throwable $e ) {
+				continue;
+			}
+		}
+	}
+
+	/**
+	 * Filters whether image generation is supported.
+	 *
+	 * Allows third-party plugins to declare image generation support for
+	 * connectors that do not rely on API key settings (e.g. OAuth), without
+	 * triggering a live API request.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @param bool  $has_support Whether image generation is supported.
+	 * @param array $connectors  The registered connectors.
+	 */
+	$result = (bool) apply_filters( 'wpai_has_image_generation_support', $has_support, $connectors );
+
+	return $result;
 }
 
 /**
@@ -539,4 +693,50 @@ function is_connector_plugin_active( array $connector_data ): bool {
 	}
 
 	return is_multisite() && function_exists( 'is_plugin_active_for_network' ) && is_plugin_active_for_network( $plugin_file );
+}
+
+/**
+ * Returns the minimum content length in characters required for a given feature.
+ *
+ * @since 1.1.0
+ *
+ * @param string $feature_id     The feature identifier (e.g. 'content-resizing', 'content-classification', 'summarization').
+ * @param int    $content_length The default minimum content length in characters for the feature.
+ * @return int The minimum content length in characters.
+ */
+function get_min_content_length( string $feature_id, int $content_length = 250 ): int {
+	/**
+	 * Filters the minimum content length required for a feature.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @param int    $content_length The minimum content length in characters for the feature.
+	 * @param string $feature_id     The feature identifier.
+	 */
+	return (int) apply_filters( 'wpai_min_content_length', $content_length, $feature_id );
+}
+
+/**
+ * Determines whether a post type supports bulk AI actions for a given feature.
+ *
+ * @since x.x.x
+ *
+ * @param string $post_type  The post type slug to check.
+ * @param string $feature_id The feature identifier (e.g. 'summarization').
+ * @return bool True if the post type supports bulk AI actions for the feature.
+ */
+function post_type_supports_bulk_action( string $post_type, string $feature_id ): bool {
+	$post_type_obj = get_post_type_object( $post_type );
+
+	// Check if the post type is registered and supports REST API and UI.
+	$base_supported = $post_type_obj
+		&& ! empty( $post_type_obj->show_in_rest )
+		&& ! empty( $post_type_obj->show_ui );
+
+	switch ( $feature_id ) {
+		case Summarization::get_id():
+			return $base_supported && 'attachment' !== $post_type;
+		default:
+			return $base_supported;
+	}
 }
