@@ -271,7 +271,6 @@ class Generate_Image_Prompt extends Abstract_Ability {
 	private function get_prompt_builder( string $prompt ) {
 		$prompt_builder = wp_ai_client_prompt( $prompt )
 			->using_system_instruction( $this->get_system_instruction( 'image-prompt-system-instruction.php' ) )
-			->using_temperature( 0.9 )
 			->using_model_preference( ...get_preferred_models_for_text_generation() );
 
 		return $this->ensure_text_generation_supported(

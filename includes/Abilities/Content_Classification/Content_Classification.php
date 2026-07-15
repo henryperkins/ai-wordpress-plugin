@@ -401,7 +401,6 @@ class Content_Classification extends Abstract_Ability {
 	private function get_prompt_builder( string $prompt ) {
 		$prompt_builder = wp_ai_client_prompt( $prompt )
 			->using_system_instruction( $this->get_system_instruction() )
-			->using_temperature( 0.5 )
 			->as_json_response( $this->suggestions_schema() );
 
 		$prompt_builder = $this->set_provider_model_preference( $prompt_builder, Content_Classification_Experiment::class );
