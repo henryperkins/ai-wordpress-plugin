@@ -304,11 +304,13 @@ class Meta_Description extends Abstract_Ability {
 		 *
 		 * @param float $result_temperature The temperature for the result of the meta description generation.
 		 */
-		$result_temperature = (float) apply_filters( 'wpai_meta_description_result_temperature', 0.7 );
-
 		$prompt_builder = wp_ai_client_prompt( $prompt )
-			->using_system_instruction( $this->get_system_instruction() )
-			->using_temperature( $result_temperature );
+			->using_system_instruction( $this->get_system_instruction() );
+
+		if ( has_filter( 'wpai_meta_description_result_temperature' ) ) {
+			$result_temperature = (float) apply_filters( 'wpai_meta_description_result_temperature', 0.7 );
+			$prompt_builder     = $prompt_builder->using_temperature( $result_temperature );
+		}
 
 		$prompt_builder = $this->set_provider_model_preference( $prompt_builder, Meta_Description_Experiment::class );
 
