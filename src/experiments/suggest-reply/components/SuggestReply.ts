@@ -37,7 +37,7 @@ const TONE_OPTIONS: { label: string; value: Tone }[] = [
 	{ label: __( 'Casual', 'ai' ), value: 'casual' },
 ];
 
-/** Writes text into the inline reply textarea and focuses it. */
+/** Writes text into the inline reply textarea. */
 function populateReplyTextarea( text: string ): void {
 	const textarea = document.querySelector< HTMLTextAreaElement >(
 		'#replycontainer #replycontent'
@@ -48,7 +48,6 @@ function populateReplyTextarea( text: string ): void {
 	}
 
 	textarea.value = text;
-	textarea.focus();
 	textarea.dispatchEvent( new Event( 'input', { bubbles: true } ) );
 }
 
@@ -252,6 +251,7 @@ function createSplitButtonControls(): HTMLElement {
 			updateSelectionUI();
 			dropdownMenu.hidden = true;
 			toggleBtn.setAttribute( 'aria-expanded', 'false' );
+			toggleBtn.focus();
 		} );
 
 		dropdownMenu.appendChild( itemBtn );
@@ -270,6 +270,17 @@ function createSplitButtonControls(): HTMLElement {
 		dropdownMenu.hidden = isExpanded;
 	} );
 
+	// Close the dropdown on Escape and return focus to its trigger.
+	container.addEventListener( 'keydown', ( event ) => {
+		if ( event.key !== 'Escape' || dropdownMenu.hidden ) {
+			return;
+		}
+
+		dropdownMenu.hidden = true;
+		toggleBtn.setAttribute( 'aria-expanded', 'false' );
+		toggleBtn.focus();
+	} );
+
 	// Close dropdown when clicking outside
 	document.addEventListener( 'click', ( e ) => {
 		if ( ! container.contains( e.target as Node ) ) {
@@ -283,6 +294,28 @@ function createSplitButtonControls(): HTMLElement {
 	container.appendChild( dropdownMenu );
 
 	return container;
+}
+
+/**
+ * Returns true when the inline form is in Quick Edit mode.
+ * WordPress hides `#edithead` in Reply mode and shows it in Quick Edit mode.
+ */
+function isQuickEditMode(): boolean {
+	const editHead = document.getElementById( 'edithead' );
+
+	return editHead !== null && editHead.style.display !== 'none';
+}
+
+/**
+ * Shows or hides the Suggest Reply controls based on the current inline-form
+ * mode. Controls are visible only in Reply mode and hidden in Quick Edit mode.
+ */
+function syncControlsVisibility(): void {
+	const wrapper = document.getElementById( CONTROLS_WRAPPER_ID );
+
+	if ( wrapper ) {
+		wrapper.style.display = isQuickEditMode() ? 'none' : '';
+	}
 }
 
 /**
@@ -315,6 +348,9 @@ function injectSuggestReplyControls(): void {
 	} else {
 		buttonArea.appendChild( wrapper );
 	}
+
+	// Sync initial visibility in case the form is already open in Quick Edit mode.
+	syncControlsVisibility();
 }
 
 /**
@@ -347,6 +383,13 @@ async function runGeneration( commentId: number, tone: Tone ): Promise< void > {
 		setReplyFormDisabled( false );
 		setLinkLoading( commentId, false );
 		setSuggestBtnLoading( false );
+
+		// Focus the textarea after the form controls are re-enabled,
+		// so that focus is not lost due to the element being disabled.
+		const textarea = document.querySelector< HTMLTextAreaElement >(
+			'#replycontainer #replycontent'
+		);
+		textarea?.focus();
 	}
 }
 
@@ -449,6 +492,21 @@ export function init(): void {
 	}
 
 	commentList.setAttribute( INIT_FLAG_ATTR, 'true' );
+
+	/**
+	 * Watch `#edithead` for style changes to detect Quick Edit vs Reply mode
+	 * and sync the controls visibility accordingly.
+	 */
+	const editHead = document.getElementById( 'edithead' );
+
+	if ( editHead ) {
+		new MutationObserver( () => {
+			syncControlsVisibility();
+		} ).observe( editHead, {
+			attributes: true,
+			attributeFilter: [ 'style' ],
+		} );
+	}
 
 	commentList.addEventListener( 'click', ( event: Event ) => {
 		const target = event.target as HTMLElement;
